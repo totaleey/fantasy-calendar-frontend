@@ -14,12 +14,17 @@ export interface Event {
   startDay: number;
   endDay: number;
   isRecurring: boolean;
+  characters?: Character[];
 }
 
 export interface Character {
   id: string;
   name: string;
   description: string;
+}
+
+export interface EventWithCharacters extends Event {
+  characters?: Character[];
 }
 
 export interface Unavailability {

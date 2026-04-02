@@ -1,15 +1,42 @@
 import React, { useEffect, useState } from 'react';
-import { Container, Typography, Box, CircularProgress, Alert } from '@mui/material';
-import { getCalendars, getEvents, getCharacters } from './api/calendarApi';
+import {
+  Container,
+  Typography,
+  Box,
+  CircularProgress,
+  Alert,
+  Select,
+  MenuItem,
+  FormControl,
+  InputLabel,
+  Chip,
+  IconButton,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  Button,
+  List,
+  ListItem,
+  ListItemText,
+  Checkbox,
+} from '@mui/material';
+import { PersonAdd, PersonRemove } from '@mui/icons-material';
+import { getCalendars, getEvents, getCharacters, assignCharacterToEvent, removeCharacterFromEvent, getEventCharacters } from './api/calendarApi';
 import { Calendar, Event, Character } from './types';
 
 function App() {
   const [calendars, setCalendars] = useState<Calendar[]>([]);
   const [selectedCalendar, setSelectedCalendar] = useState<string>('');
-  const [events, setEvents] = useState<Event[]>([]);
-  const [characters, setCharacters] = useState<Character[]>([]);
+  const [events, setEvents] = useState<(Event & { characters?: Character[] })[]>([]);  const [characters, setCharacters] = useState<Character[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string>('');
+  
+  // Character assignment dialog
+  const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
+  const [assignedCharacters, setAssignedCharacters] = useState<Character[]>([]);
+  const [dialogOpen, setDialogOpen] = useState<boolean>(false);
+  const [updating, setUpdating] = useState<boolean>(false);
 
   // Load calendars on mount
   useEffect(() => {
@@ -53,6 +80,49 @@ function App() {
     loadData();
   }, [selectedCalendar]);
 
+  // Open dialog and load assigned characters
+  const handleOpenDialog = async (event: Event) => {
+    setSelectedEvent(event);
+    setDialogOpen(true);
+    setUpdating(true);
+    try {
+      const assigned = await getEventCharacters(event.id);
+      setAssignedCharacters(assigned);
+    } catch (err) {
+      console.error('Failed to load assigned characters', err);
+    } finally {
+      setUpdating(false);
+    }
+  };
+
+  // Handle character assignment toggle
+  const handleToggleCharacter = async (character: Character) => {
+    if (!selectedEvent) return;
+    
+    const isAssigned = assignedCharacters.some(c => c.id === character.id);
+    
+    setUpdating(true);
+    try {
+      if (isAssigned) {
+        await removeCharacterFromEvent(selectedEvent.id, character.id);
+        setAssignedCharacters(assignedCharacters.filter(c => c.id !== character.id));
+      } else {
+        await assignCharacterToEvent(selectedEvent.id, character.id);
+        setAssignedCharacters([...assignedCharacters, character]);
+      }
+    } catch (err) {
+      console.error('Failed to update character assignment', err);
+    } finally {
+      setUpdating(false);
+    }
+  };
+
+  const handleCloseDialog = () => {
+    setDialogOpen(false);
+    setSelectedEvent(null);
+    setAssignedCharacters([]);
+  };
+
   if (loading && calendars.length === 0) {
     return (
       <Box display="flex" justifyContent="center" alignItems="center" minHeight="100vh">
@@ -78,17 +148,20 @@ function App() {
         <Typography variant="h6" gutterBottom>
           Select Calendar
         </Typography>
-        <select
-          value={selectedCalendar}
-          onChange={(e) => setSelectedCalendar(e.target.value)}
-          style={{ padding: '8px', fontSize: '16px', width: '100%', maxWidth: '300px' }}
-        >
-          {calendars.map((cal) => (
-            <option key={cal.id} value={cal.id}>
-              {cal.name}
-            </option>
-          ))}
-        </select>
+        <FormControl fullWidth sx={{ maxWidth: 300 }}>
+          <InputLabel>Calendar</InputLabel>
+          <Select
+            value={selectedCalendar}
+            onChange={(e) => setSelectedCalendar(e.target.value)}
+            label="Calendar"
+          >
+            {calendars.map((cal) => (
+              <MenuItem key={cal.id} value={cal.id}>
+                {cal.name}
+              </MenuItem>
+            ))}
+          </Select>
+        </FormControl>
       </Box>
 
       {/* Events Section */}
@@ -99,19 +172,57 @@ function App() {
         {events.length === 0 ? (
           <Typography color="text.secondary">No events yet.</Typography>
         ) : (
-          <ul style={{ listStyle: 'none', padding: 0 }}>
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
             {events.map((event) => (
-              <li key={event.id} style={{ marginBottom: '12px', padding: '12px', border: '1px solid #ddd', borderRadius: '8px' }}>
-                <strong>{event.title}</strong> {event.isRecurring && <span style={{ fontSize: '12px', background: '#e0e0e0', padding: '2px 6px', borderRadius: '4px', marginLeft: '8px' }}>Recurring</span>}
-                <br />
-                <span style={{ fontSize: '14px', color: '#666' }}>
-                  Days {event.startDay} — {event.endDay}
-                </span>
-                <br />
-                <span style={{ fontSize: '14px' }}>{event.description}</span>
-              </li>
+              <Box
+                key={event.id}
+                sx={{
+                  p: 2,
+                  border: '1px solid #ddd',
+                  borderRadius: 2,
+                  '&:hover': { boxShadow: 1 }
+                }}
+              >
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                  <Box>
+                    <Typography variant="h6">
+                      {event.title}
+                      {event.isRecurring && (
+                        <Chip label="Recurring" size="small" sx={{ ml: 1 }} />
+                      )}
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                      Days {event.startDay} — {event.endDay}
+                    </Typography>
+                    <Typography variant="body2" sx={{ mt: 1 }}>
+                      {event.description}
+                    </Typography>
+                  </Box>
+                  <IconButton
+                    onClick={() => handleOpenDialog(event)}
+                    color="primary"
+                    title="Manage characters"
+                  >
+                    <PersonAdd />
+                  </IconButton>
+                </Box>
+
+                {/* Show assigned characters if any */}
+                {event.characters && event.characters.length > 0 && (
+                  <Box sx={{ mt: 2, display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+                    {event.characters.map((char) => (
+                      <Chip
+                        key={char.id}
+                        label={char.name}
+                        size="small"
+                        variant="outlined"
+                      />
+                    ))}
+                  </Box>
+                )}
+              </Box>
             ))}
-          </ul>
+          </Box>
         )}
       </Box>
 
@@ -123,17 +234,73 @@ function App() {
         {characters.length === 0 ? (
           <Typography color="text.secondary">No characters yet.</Typography>
         ) : (
-          <ul style={{ listStyle: 'none', padding: 0 }}>
+          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2 }}>
             {characters.map((char) => (
-              <li key={char.id} style={{ marginBottom: '12px', padding: '12px', border: '1px solid #ddd', borderRadius: '8px' }}>
-                <strong>{char.name}</strong>
-                <br />
-                <span style={{ fontSize: '14px' }}>{char.description}</span>
-              </li>
+              <Box
+                key={char.id}
+                sx={{
+                  p: 2,
+                  border: '1px solid #ddd',
+                  borderRadius: 2,
+                  minWidth: 200,
+                }}
+              >
+                <Typography variant="subtitle1">
+                  <strong>{char.name}</strong>
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  {char.description}
+                </Typography>
+              </Box>
             ))}
-          </ul>
+          </Box>
         )}
       </Box>
+
+      {/* Character Assignment Dialog */}
+      <Dialog open={dialogOpen} onClose={handleCloseDialog} maxWidth="sm" fullWidth>
+        <DialogTitle>
+          Manage Characters for "{selectedEvent?.title}"
+        </DialogTitle>
+        <DialogContent>
+          {updating ? (
+            <Box display="flex" justifyContent="center" sx={{ py: 4 }}>
+              <CircularProgress />
+            </Box>
+          ) : (
+            <List>
+              {characters.map((character) => {
+                const isAssigned = assignedCharacters.some(c => c.id === character.id);
+                return (
+                  <ListItem
+                    key={character.id}
+                    secondaryAction={
+                      <Checkbox
+                        edge="end"
+                        checked={isAssigned}
+                        onChange={() => handleToggleCharacter(character)}
+                      />
+                    }
+                  >
+                    <ListItemText
+                      primary={character.name}
+                      secondary={character.description}
+                    />
+                  </ListItem>
+                );
+              })}
+              {characters.length === 0 && (
+                <Typography color="text.secondary" sx={{ textAlign: 'center', py: 4 }}>
+                  No characters available. Create some first!
+                </Typography>
+              )}
+            </List>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCloseDialog}>Close</Button>
+        </DialogActions>
+      </Dialog>
     </Container>
   );
 }
