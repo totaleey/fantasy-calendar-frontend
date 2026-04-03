@@ -20,17 +20,23 @@ import {
   ListItem,
   ListItemText,
   Checkbox,
+  ToggleButton,
+  ToggleButtonGroup,
+  Paper,
 } from '@mui/material';
-import { PersonAdd, PersonRemove } from '@mui/icons-material';
+import { PersonAdd, ViewList, ViewModule } from '@mui/icons-material';
 import { getCalendars, getEvents, getCharacters, assignCharacterToEvent, removeCharacterFromEvent, getEventCharacters } from './api/calendarApi';
 import { Calendar, Event, Character } from './types';
+import CalendarView from './componets/CalendarView';
 
 function App() {
   const [calendars, setCalendars] = useState<Calendar[]>([]);
   const [selectedCalendar, setSelectedCalendar] = useState<string>('');
-  const [events, setEvents] = useState<(Event & { characters?: Character[] })[]>([]);  const [characters, setCharacters] = useState<Character[]>([]);
+  const [events, setEvents] = useState<(Event & { characters?: Character[] })[]>([]);
+  const [characters, setCharacters] = useState<Character[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string>('');
+  const [viewMode, setViewMode] = useState<'list' | 'calendar'>('list');
   
   // Character assignment dialog
   const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
@@ -106,9 +112,21 @@ function App() {
       if (isAssigned) {
         await removeCharacterFromEvent(selectedEvent.id, character.id);
         setAssignedCharacters(assignedCharacters.filter(c => c.id !== character.id));
+        // Update events list to reflect character removal
+        setEvents(events.map(event => 
+          event.id === selectedEvent.id 
+            ? { ...event, characters: event.characters?.filter(c => c.id !== character.id) }
+            : event
+        ));
       } else {
         await assignCharacterToEvent(selectedEvent.id, character.id);
         setAssignedCharacters([...assignedCharacters, character]);
+        // Update events list to reflect character addition
+        setEvents(events.map(event => 
+          event.id === selectedEvent.id 
+            ? { ...event, characters: [...(event.characters || []), character] }
+            : event
+        ));
       }
     } catch (err) {
       console.error('Failed to update character assignment', err);
@@ -121,6 +139,12 @@ function App() {
     setDialogOpen(false);
     setSelectedEvent(null);
     setAssignedCharacters([]);
+  };
+
+  const handleViewChange = (event: React.MouseEvent<HTMLElement>, newMode: 'list' | 'calendar' | null) => {
+    if (newMode !== null) {
+      setViewMode(newMode);
+    }
   };
 
   if (loading && calendars.length === 0) {
@@ -164,67 +188,95 @@ function App() {
         </FormControl>
       </Box>
 
-      {/* Events Section */}
-      <Box sx={{ mb: 4 }}>
-        <Typography variant="h5" gutterBottom>
+      {/* View Toggle */}
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+        <Typography variant="h5">
           Events
         </Typography>
-        {events.length === 0 ? (
-          <Typography color="text.secondary">No events yet.</Typography>
-        ) : (
-          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-            {events.map((event) => (
-              <Box
-                key={event.id}
-                sx={{
-                  p: 2,
-                  border: '1px solid #ddd',
-                  borderRadius: 2,
-                  '&:hover': { boxShadow: 1 }
-                }}
-              >
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                  <Box>
-                    <Typography variant="h6">
-                      {event.title}
-                      {event.isRecurring && (
-                        <Chip label="Recurring" size="small" sx={{ ml: 1 }} />
-                      )}
-                    </Typography>
-                    <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-                      Days {event.startDay} — {event.endDay}
-                    </Typography>
-                    <Typography variant="body2" sx={{ mt: 1 }}>
-                      {event.description}
-                    </Typography>
-                  </Box>
-                  <IconButton
-                    onClick={() => handleOpenDialog(event)}
-                    color="primary"
-                    title="Manage characters"
-                  >
-                    <PersonAdd />
-                  </IconButton>
-                </Box>
-
-                {/* Show assigned characters if any */}
-                {event.characters && event.characters.length > 0 && (
-                  <Box sx={{ mt: 2, display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-                    {event.characters.map((char) => (
-                      <Chip
-                        key={char.id}
-                        label={char.name}
-                        size="small"
-                        variant="outlined"
-                      />
-                    ))}
-                  </Box>
-                )}
-              </Box>
-            ))}
-          </Box>
-        )}
+        <ToggleButtonGroup
+          value={viewMode}
+          exclusive
+          onChange={handleViewChange}
+          aria-label="view mode"
+          size="small"
+        >
+          <ToggleButton value="list" aria-label="list view">
+            <ViewList />
+          </ToggleButton>
+          <ToggleButton value="calendar" aria-label="calendar view">
+            <ViewModule />
+          </ToggleButton>
+        </ToggleButtonGroup>
       </Box>
+
+      {/* Events View */}
+      {viewMode === 'list' ? (
+        <Box sx={{ mb: 4 }}>
+          {events.length === 0 ? (
+            <Typography color="text.secondary">No events yet.</Typography>
+          ) : (
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+              {events.map((event) => (
+                <Box
+                  key={event.id}
+                  sx={{
+                    p: 2,
+                    border: '1px solid #ddd',
+                    borderRadius: 2,
+                    '&:hover': { boxShadow: 1 }
+                  }}
+                >
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                    <Box>
+                      <Typography variant="h6">
+                        {event.title}
+                        {event.isRecurring && (
+                          <Chip label="Recurring" size="small" sx={{ ml: 1 }} />
+                        )}
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                        Days {event.startDay} — {event.endDay}
+                      </Typography>
+                      <Typography variant="body2" sx={{ mt: 1 }}>
+                        {event.description}
+                      </Typography>
+                    </Box>
+                    <IconButton
+                      onClick={() => handleOpenDialog(event)}
+                      color="primary"
+                      title="Manage characters"
+                    >
+                      <PersonAdd />
+                    </IconButton>
+                  </Box>
+                  
+                  {/* Show assigned characters if any */}
+                  {event.characters && event.characters.length > 0 && (
+                    <Box sx={{ mt: 2, display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+                      {event.characters.map((char) => (
+                        <Chip
+                          key={char.id}
+                          label={char.name}
+                          size="small"
+                          variant="outlined"
+                        />
+                      ))}
+                    </Box>
+                  )}
+                </Box>
+              ))}
+            </Box>
+          )}
+        </Box>
+      ) : (
+        <Paper sx={{ p: 2, overflow: 'auto', mb: 4 }}>
+          <CalendarView 
+            events={events}
+            characters={characters}
+            onEventClick={handleOpenDialog}
+          />
+        </Paper>
+      )}
 
       {/* Characters Section */}
       <Box>
